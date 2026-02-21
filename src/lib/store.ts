@@ -52,7 +52,8 @@ export type AppAction =
   | { type: "UPDATE_BILL_CUSTOMER"; id: string; customer: string | null }
   | { type: "SAVE_BILL"; id: string }
   | { type: "DEL_FROM_QUEUE"; id: string }
-  | { type: "DEL_BILL"; id: string };
+  | { type: "DEL_BILL"; id: string }
+  | { type: "EDIT_BILL"; id: string };
 
 let billCounter = 0;
 
@@ -115,6 +116,16 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     }
     case "DEL_BILL":
       return { ...state, bills: state.bills.filter(b => b.id !== action.id) };
+    case "EDIT_BILL": {
+      const bill = state.bills.find(b => b.id === action.id);
+      if (!bill) return state;
+      return {
+        ...state,
+        bills: state.bills.filter(b => b.id !== action.id),
+        queue: [...state.queue, { ...bill, savedAt: undefined }],
+        activeBillId: bill.id,
+      };
+    }
     default:
       return state;
   }
