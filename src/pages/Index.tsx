@@ -41,7 +41,7 @@ const Index = () => {
       {/* Pages */}
       {activeTab === "stock" && <StockPage state={state} dispatch={dispatch} showToast={showToast} />}
       {activeTab === "billing" && <BillingPage state={state} dispatch={dispatch} showToast={showToast} />}
-      {activeTab === "saved" && <SavedBillsPage state={state} dispatch={dispatch} showToast={showToast} />}
+      {activeTab === "saved" && <SavedBillsPage state={state} dispatch={dispatch} showToast={showToast} onSwitchTab={setActiveTab} />}
       {activeTab === "settings" && <SettingsPage state={state} dispatch={dispatch} showToast={showToast} />}
 
       {/* Bottom Nav */}

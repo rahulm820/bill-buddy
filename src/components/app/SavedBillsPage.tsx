@@ -6,9 +6,10 @@ interface SavedBillsPageProps {
   state: AppState;
   dispatch: Dispatch<AppAction>;
   showToast: (msg: string) => void;
+  onSwitchTab?: (tab: string) => void;
 }
 
-export default function SavedBillsPage({ state, dispatch, showToast }: SavedBillsPageProps) {
+export default function SavedBillsPage({ state, dispatch, showToast, onSwitchTab }: SavedBillsPageProps) {
   const [search, setSearch] = useState("");
   const [confirm, setConfirm] = useState<string | null>(null);
 
@@ -64,6 +65,16 @@ export default function SavedBillsPage({ state, dispatch, showToast }: SavedBill
                 {b.customer && <div className="text-[11px] text-muted-foreground">👤 {b.customer}</div>}
               </div>
               <div className="flex gap-1.5">
+                <button
+                  onClick={() => {
+                    dispatch({ type: "EDIT_BILL", id: b.id });
+                    showToast("Bill moved to queue for editing!");
+                    onSwitchTab?.("billing");
+                  }}
+                  className="px-2.5 py-1 rounded-sm border border-border bg-surface2 text-foreground text-[11px] cursor-pointer hover:border-primary hover:text-primary transition-colors"
+                >
+                  ✏️
+                </button>
                 <button
                   onClick={() => showToast("🖨️ Print/PDF ready!")}
                   className="px-2.5 py-1 rounded-sm border border-border bg-surface2 text-foreground text-[11px] cursor-pointer hover:border-primary hover:text-primary transition-colors"
