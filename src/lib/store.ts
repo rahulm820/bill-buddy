@@ -1,45 +1,37 @@
 export const genId = () => Math.random().toString(36).slice(2, 9);
 export const formatCurrency = (n: number) => `₹${Number(n || 0).toFixed(2)}`;
 
-export interface Field {
-  id: string;
-  label: string;
-  value: string;
-}
-
-export interface Entity {
-  id: string;
-  fields: Field[];
-}
-
-export interface BillRow {
-  id: string;
-  name: string;
-  price: string;
-  qty: string;
-}
+export interface Field { id: string; label: string; value: string; }
+export interface Entity { id: string; fields: Field[]; }
+export interface BillRow { id: string; name: string; price: string; qty: string; }
 
 export interface QueueBill {
-  id: string;
-  num: number;
-  rows: BillRow[];
-  customer: string | null;
-  savedAt?: number;
+  id: string; num: number; rows: BillRow[];
+  customer: string | null; savedAt?: number;
+}
+
+export interface AppUser {
+  id: string; name: string; email: string;
+  phone?: string | null; business_name?: string | null;
 }
 
 export interface AppState {
   isLoggedIn: boolean;
-  user: { name: string; email: string } | null;
+  user: AppUser | null;
   customers: Entity[];
   items: Entity[];
   bills: QueueBill[];
   queue: QueueBill[];
   activeBillId: string | null;
+  syncStatus: "idle" | "syncing" | "synced" | "error" | "offline";
 }
 
 export type AppAction =
-  | { type: "LOGIN"; user: { name: string; email: string } }
+  | { type: "LOGIN"; user: AppUser }
   | { type: "LOGOUT" }
+  | { type: "SET_SYNC_STATUS"; status: AppState["syncStatus"] }
+  | { type: "UPDATE_USER_PROFILE"; updates: Partial<AppUser> }
+  | { type: "LOAD_CLOUD_DATA"; customers: Entity[]; items: Entity[]; bills: QueueBill[] }
   | { type: "ADD_CUSTOMER"; fields: Field[] }
   | { type: "UPDATE_CUSTOMER"; id: string; fields: Field[] }
   | { type: "DEL_CUSTOMER"; id: string }
@@ -58,29 +50,25 @@ export type AppAction =
 let billCounter = 0;
 
 export const INITIAL_STATE: AppState = {
-  isLoggedIn: false,
-  user: null,
-  customers: [
-    { id: genId(), fields: [{ id: genId(), label: "Name", value: "Rahul Sharma" }, { id: genId(), label: "Phone", value: "9876543210" }, { id: genId(), label: "Shop Name", value: "Sharma Traders" }] },
-    { id: genId(), fields: [{ id: genId(), label: "Name", value: "Priya Patel" }, { id: genId(), label: "Phone", value: "9988776655" }, { id: genId(), label: "GST", value: "29ABCDE1234F1Z5" }] },
-  ],
-  items: [
-    { id: genId(), fields: [{ id: genId(), label: "Item Name", value: "Basmati Rice" }, { id: genId(), label: "Net Rate", value: "65" }, { id: genId(), label: "Unit", value: "kg" }] },
-    { id: genId(), fields: [{ id: genId(), label: "Item Name", value: "Refined Oil" }, { id: genId(), label: "Net Rate", value: "130" }, { id: genId(), label: "Offer", value: "5% off" }, { id: genId(), label: "Unit", value: "litre" }] },
-    { id: genId(), fields: [{ id: genId(), label: "Item Name", value: "Wheat Flour" }, { id: genId(), label: "Net Rate", value: "42" }, { id: genId(), label: "Unit", value: "kg" }] },
-    { id: genId(), fields: [{ id: genId(), label: "Item Name", value: "Sugar" }, { id: genId(), label: "Net Rate", value: "45" }, { id: genId(), label: "Unit", value: "kg" }] },
-  ],
-  bills: [],
-  queue: [],
-  activeBillId: null,
+  isLoggedIn: false, user: null, customers: [], items: [],
+  bills: [], queue: [], activeBillId: null, syncStatus: "idle",
 };
 
 export function appReducer(state: AppState, action: AppAction): AppState {
   switch (action.type) {
     case "LOGIN":
-      return { ...state, isLoggedIn: true, user: action.user };
+      return { ...state, isLoggedIn: true, user: action.user, syncStatus: "syncing" };
     case "LOGOUT":
       return { ...INITIAL_STATE };
+    case "SET_SYNC_STATUS":
+      return { ...state, syncStatus: action.status };
+    case "UPDATE_USER_PROFILE":
+      return { ...state, user: state.user ? { ...state.user, ...action.updates } : state.user };
+    case "LOAD_CLOUD_DATA": {
+      const maxNum = Math.max(0, ...action.bills.map(b => b.num));
+      if (maxNum > billCounter) billCounter = maxNum;
+      return { ...state, customers: action.customers, items: action.items, bills: action.bills, syncStatus: "synced" };
+    }
     case "ADD_CUSTOMER":
       return { ...state, customers: [...state.customers, { id: genId(), fields: action.fields }] };
     case "UPDATE_CUSTOMER":
@@ -94,8 +82,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     case "DEL_ITEM":
       return { ...state, items: state.items.filter(i => i.id !== action.id) };
     case "NEW_BILL": {
-      const id = genId();
-      const num = ++billCounter;
+      const id = genId(); const num = ++billCounter;
       return { ...state, queue: [...state.queue, { id, num, rows: [{ id: genId(), name: "", price: "", qty: "1" }], customer: null }], activeBillId: id };
     }
     case "SET_ACTIVE_BILL":
@@ -119,14 +106,8 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     case "EDIT_BILL": {
       const bill = state.bills.find(b => b.id === action.id);
       if (!bill) return state;
-      return {
-        ...state,
-        bills: state.bills.filter(b => b.id !== action.id),
-        queue: [...state.queue, { ...bill, savedAt: undefined }],
-        activeBillId: bill.id,
-      };
+      return { ...state, bills: state.bills.filter(b => b.id !== action.id), queue: [...state.queue, { ...bill, savedAt: undefined }], activeBillId: bill.id };
     }
-    default:
-      return state;
+    default: return state;
   }
 }
