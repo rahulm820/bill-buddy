@@ -128,7 +128,7 @@ const Index = () => {
 
   return (
     <div className="app-shell">
-      <header className="px-4 pt-3.5 pb-2.5 border-b border-border bg-background flex items-center justify-between sticky top-0 z-50">
+      {/* <header className="px-4 pt-3.5 pb-2.5 border-b border-border bg-background flex items-center justify-between sticky top-0 z-50">
         <h1 className="font-head text-xl font-extrabold tracking-tight">
           Bill<span className="text-primary">Stock</span>
         </h1>
@@ -142,7 +142,7 @@ const Index = () => {
           )}
           <span className="text-[10px] text-muted-foreground">{state.user?.name}</span>
         </div>
-      </header>
+      </header> */}
 
       {activeTab === "stock"    && <StockPage state={state} dispatch={dispatch} showToast={showToast} />}
       {activeTab === "billing"  && <BillingPage state={state} dispatch={dispatch} showToast={showToast} />}

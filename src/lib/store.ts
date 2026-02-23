@@ -5,9 +5,27 @@ export interface Field { id: string; label: string; value: string; }
 export interface Entity { id: string; fields: Field[]; }
 export interface BillRow { id: string; name: string; price: string; qty: string; }
 
+// Each individual payment entry
+export interface PaymentEntry {
+  id: string;
+  amount: number;
+  mode: string;        // cash | upi | card | credit
+  paidAt: number;      // timestamp
+  note?: string;
+}
+
 export interface QueueBill {
-  id: string; num: number; rows: BillRow[];
-  customer: string | null; savedAt?: number;
+  id: string;
+  num: number;
+  rows: BillRow[];
+  customer: string | null;
+  savedAt?: number;
+  totalAmount?: number;
+  // NEW: full payment history replaces single amountPaid
+  payments: PaymentEntry[];
+  // Legacy fields kept for backward-compat with old saved data
+  amountPaid?: number;
+  paymentMode?: string;
 }
 
 export interface AppUser {
@@ -42,7 +60,9 @@ export type AppAction =
   | { type: "SET_ACTIVE_BILL"; id: string }
   | { type: "UPDATE_BILL_ROWS"; id: string; rows: BillRow[] }
   | { type: "UPDATE_BILL_CUSTOMER"; id: string; customer: string | null }
-  | { type: "SAVE_BILL"; id: string }
+  | { type: "SAVE_BILL"; id: string; payment: PaymentEntry; totalAmount: number }
+  | { type: "RESAVE_BILL"; id: string; payment?: PaymentEntry; totalAmount: number }  // re-save after item edit — keeps old payments
+  | { type: "ADD_PAYMENT"; id: string; payment: PaymentEntry }
   | { type: "DEL_FROM_QUEUE"; id: string }
   | { type: "DEL_BILL"; id: string }
   | { type: "EDIT_BILL"; id: string };
@@ -53,6 +73,26 @@ export const INITIAL_STATE: AppState = {
   isLoggedIn: false, user: null, customers: [], items: [],
   bills: [], queue: [], activeBillId: null, syncStatus: "idle",
 };
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+/** Sum all payments on a bill (handles legacy amountPaid too) */
+export function getTotalPaid(bill: QueueBill): number {
+  const fromHistory = (bill.payments || []).reduce((s, p) => s + p.amount, 0);
+  // If no payments array yet (old data), fall back to legacy field
+  if (fromHistory === 0 && bill.amountPaid) return bill.amountPaid;
+  return fromHistory;
+}
+
+export function getBillTotal(bill: QueueBill): number {
+  return bill.totalAmount ?? bill.rows.reduce(
+    (s, r) => s + (parseFloat(r.price) || 0) * (parseFloat(r.qty) || 0), 0
+  );
+}
+
+export function getBalanceDue(bill: QueueBill): number {
+  return getBillTotal(bill) - getTotalPaid(bill);
+}
 
 export function appReducer(state: AppState, action: AppAction): AppState {
   switch (action.type) {
@@ -67,7 +107,9 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     case "LOAD_CLOUD_DATA": {
       const maxNum = Math.max(0, ...action.bills.map(b => b.num));
       if (maxNum > billCounter) billCounter = maxNum;
-      return { ...state, customers: action.customers, items: action.items, bills: action.bills, syncStatus: "synced" };
+      // Ensure every loaded bill has a payments array
+      const bills = action.bills.map(b => ({ ...b, payments: b.payments || [] }));
+      return { ...state, customers: action.customers, items: action.items, bills, syncStatus: "synced" };
     }
     case "ADD_CUSTOMER":
       return { ...state, customers: [...state.customers, { id: genId(), fields: action.fields }] };
@@ -83,7 +125,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       return { ...state, items: state.items.filter(i => i.id !== action.id) };
     case "NEW_BILL": {
       const id = genId(); const num = ++billCounter;
-      return { ...state, queue: [...state.queue, { id, num, rows: [{ id: genId(), name: "", price: "", qty: "1" }], customer: null }], activeBillId: id };
+      return { ...state, queue: [...state.queue, { id, num, rows: [{ id: genId(), name: "", price: "", qty: "1" }], customer: null, payments: [] }], activeBillId: id };
     }
     case "SET_ACTIVE_BILL":
       return { ...state, activeBillId: action.id };
@@ -95,7 +137,39 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       const bill = state.queue.find(b => b.id === action.id);
       if (!bill) return state;
       const newQueue = state.queue.filter(b => b.id !== action.id);
-      return { ...state, bills: [...state.bills, { ...bill, savedAt: Date.now() }], queue: newQueue, activeBillId: newQueue[0]?.id || null };
+      const savedBill: QueueBill = {
+        ...bill,
+        savedAt: Date.now(),
+        totalAmount: action.totalAmount,
+        payments: [...(bill.payments || []), action.payment],
+      };
+      return { ...state, bills: [...state.bills, savedBill], queue: newQueue, activeBillId: newQueue[0]?.id || null };
+    }
+    case "RESAVE_BILL": {
+      // Re-saving after item edit: preserve existing payments, only append if a new payment provided
+      const bill = state.queue.find(b => b.id === action.id);
+      if (!bill) return state;
+      const newQueue = state.queue.filter(b => b.id !== action.id);
+      const savedBill: QueueBill = {
+        ...bill,
+        savedAt: Date.now(),
+        totalAmount: action.totalAmount,
+        payments: action.payment
+          ? [...(bill.payments || []), action.payment]
+          : (bill.payments || []),
+      };
+      return { ...state, bills: [...state.bills, savedBill], queue: newQueue, activeBillId: newQueue[0]?.id || null };
+    }
+    case "ADD_PAYMENT": {
+      // Append a new payment to an already-saved bill — does NOT touch items
+      return {
+        ...state,
+        bills: state.bills.map(b =>
+          b.id === action.id
+            ? { ...b, payments: [...(b.payments || []), action.payment] }
+            : b
+        ),
+      };
     }
     case "DEL_FROM_QUEUE": {
       const newQueue = state.queue.filter(b => b.id !== action.id);
@@ -106,7 +180,13 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     case "EDIT_BILL": {
       const bill = state.bills.find(b => b.id === action.id);
       if (!bill) return state;
-      return { ...state, bills: state.bills.filter(b => b.id !== action.id), queue: [...state.queue, { ...bill, savedAt: undefined }], activeBillId: bill.id };
+      // Preserve payment history when editing items
+      return {
+        ...state,
+        bills: state.bills.filter(b => b.id !== action.id),
+        queue: [...state.queue, { ...bill, savedAt: undefined }],
+        activeBillId: bill.id,
+      };
     }
     default: return state;
   }
