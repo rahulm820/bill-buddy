@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, Dispatch, useCallback } from "react";
+import { createPortal } from "react-dom";
 import { AppState, AppAction, Entity, genId, formatCurrency, BillRow } from "@/lib/store";
 import PrintPreviewModal from "./PrintPreviewModal";
 import PaymentModal from "./PaymentModal";
@@ -159,7 +160,9 @@ interface AutocompleteInputProps {
 function AutocompleteInput({ value, onChange, items, onSelectItem, placeholder }: AutocompleteInputProps) {
   const [open, setOpen] = useState(false);
   const [highlighted, setHighlighted] = useState(0);
-  const wrapRef = useRef<HTMLDivElement>(null);
+  const [dropdownStyle, setDropdownStyle] = useState<React.CSSProperties>({});
+  const wrapRef  = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   const suggestions = value.trim().length > 0
     ? items.filter(item => {
@@ -168,20 +171,44 @@ function AutocompleteInput({ value, onChange, items, onSelectItem, placeholder }
       }).slice(0, 6)
     : [];
 
+  // Recompute dropdown position every time it opens or window scrolls/resizes
+  const reposition = useCallback(() => {
+    if (!inputRef.current) return;
+    const rect = inputRef.current.getBoundingClientRect();
+    setDropdownStyle({
+      position: "fixed",
+      top: rect.bottom + 4,
+      left: rect.left,
+      width: rect.width,
+      zIndex: 99999,
+    });
+  }, []);
+
+  useEffect(() => {
+    if (open) reposition();
+  }, [open, reposition]);
+
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
       if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
     };
+    const handleScroll = () => { if (open) reposition(); };
     document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
-  }, []);
+    window.addEventListener("scroll", handleScroll, true);
+    window.addEventListener("resize", handleScroll);
+    return () => {
+      document.removeEventListener("mousedown", handleClick);
+      window.removeEventListener("scroll", handleScroll, true);
+      window.removeEventListener("resize", handleScroll);
+    };
+  }, [open, reposition]);
 
   const selectSuggestion = (item: Entity) => {
     const nameField = item.fields.find(f => f.label.toLowerCase().includes("item name") || f.label.toLowerCase().includes("name"));
     const rateField = item.fields.find(f =>
       f.label.toLowerCase().includes("net rate") || f.label.toLowerCase().includes("rate") || f.label.toLowerCase().includes("price")
     );
-    onSelectItem(nameField?.value || "", rateField?.value || "");
+    onSelectItem(nameField?.value || "", "");
     setOpen(false);
     setHighlighted(0);
   };
@@ -194,18 +221,12 @@ function AutocompleteInput({ value, onChange, items, onSelectItem, placeholder }
     if (e.key === "Escape") setOpen(false);
   };
 
-  return (
-    <div className="relative" ref={wrapRef}>
-      <input
-        value={value}
-        placeholder={placeholder}
-        onChange={e => { onChange(e.target.value); setOpen(true); setHighlighted(0); }}
-        onFocus={() => setOpen(true)}
-        onKeyDown={handleKeyDown}
-        className="w-full bg-surface2 border border-border rounded-sm px-2 py-[7px] text-foreground font-mono text-xs outline-none focus:border-primary transition-colors"
-      />
-      {open && suggestions.length > 0 && (
-        <div className="absolute top-[calc(100%+4px)] left-0 right-0 bg-card border border-primary rounded-sm z-[150] max-h-[180px] overflow-y-auto shadow-[0_8px_24px_rgba(0,0,0,0.5)]">
+  const dropdown = open && suggestions.length > 0
+    ? createPortal(
+        <div
+          style={dropdownStyle}
+          className="bg-card border border-primary rounded-sm max-h-[220px] overflow-y-auto shadow-[0_8px_32px_rgba(0,0,0,0.6)]"
+        >
           {suggestions.map((item, idx) => {
             const nameField = item.fields.find(f => f.label.toLowerCase().includes("item name") || f.label.toLowerCase().includes("name"));
             const rateField = item.fields.find(f =>
@@ -217,15 +238,30 @@ function AutocompleteInput({ value, onChange, items, onSelectItem, placeholder }
                 className={`px-3 py-2.5 cursor-pointer text-xs flex justify-between items-center border-b border-border last:border-b-0 transition-colors ${
                   idx === highlighted ? "bg-surface2 text-primary" : "hover:bg-surface2 hover:text-primary"
                 }`}
-                onClick={() => selectSuggestion(item)}
+                onMouseDown={e => { e.preventDefault(); selectSuggestion(item); }}
               >
-                <span>{nameField?.value}</span>
+                <span className="text-foreground">{nameField?.value}</span>
                 {rateField && <span className="text-[10px] text-primary font-semibold">₹{rateField.value}</span>}
               </div>
             );
           })}
-        </div>
-      )}
+        </div>,
+        document.body
+      )
+    : null;
+
+  return (
+    <div className="relative" ref={wrapRef}>
+      <input
+        ref={inputRef}
+        value={value}
+        placeholder={placeholder}
+        onChange={e => { onChange(e.target.value); setOpen(true); setHighlighted(0); }}
+        onFocus={() => { reposition(); setOpen(true); }}
+        onKeyDown={handleKeyDown}
+        className="w-full bg-surface2 border border-border rounded-sm px-2 py-[7px] text-foreground font-mono text-xs outline-none focus:border-primary transition-colors"
+      />
+      {dropdown}
     </div>
   );
 }
